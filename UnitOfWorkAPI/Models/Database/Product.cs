@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 
 namespace UnitOfWorkAPI.Models.Database;
 
@@ -23,5 +24,5 @@ public class Product : BaseRecord
     [Required]
     public int QtyInStock { get; set; }
 
-    public virtual ICollection<InvoiceItem> InvoiceItems { get; set; }
+    public virtual ICollection<InvoiceItem> InvoiceItems { get; set; } = new HashSet<InvoiceItem>();
 }

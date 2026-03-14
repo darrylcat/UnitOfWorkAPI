@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Collections.Generic;
 
 namespace UnitOfWorkAPI.Models.Database;
 
@@ -14,5 +15,5 @@ public class Invoice : BaseRecord
     public decimal Vat { get; set; }
     public decimal Gross { get; set; }
 
-    public virtual ICollection<InvoiceItem> InvoiceItems { get; set; }
+    public virtual ICollection<InvoiceItem> InvoiceItems { get; set; } = new HashSet<InvoiceItem>();
 }
