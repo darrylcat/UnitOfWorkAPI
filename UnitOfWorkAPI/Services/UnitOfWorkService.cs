@@ -10,25 +10,27 @@ using UnitOfWorkAPI.Models.Database;
 
 namespace UnitOfWorkAPI.Services;
 
-/// <summary>
-/// Singleton-style service that mediates concurrent readonly access and serialized exclusive write transactions.
-/// </summary>
-public sealed class UnitOfWorkService : IUnitOfWorkService
+public sealed class UnitOfWorkService : IUnitOfWorkService, IDisposable
 {
-    private readonly IDbContextFactory<UOWContext> _dbContextFactory;
+    private readonly IDbContextFactory<UOWContext>? _dbContextFactory;
     private readonly ILogger<UnitOfWorkService> _logger;
+    private readonly ILockRequestFactory _lockRequestFactory;
 
     // Shared context used for exclusive operations (transactional)
-    private readonly UOWContext _sharedContext;
+    private readonly UOWContext? _sharedContext;
+
+    // Optional transaction starter (test seam / customization)
+    private readonly Func<CancellationToken, Task<IDbContextTransaction>>? _transactionStarter;
 
     // Transaction for the current exclusive lock
     private IDbContextTransaction? _currentTransaction;
     private Guid? _currentLockId;
+    private ILockRequest? _currentRequest;
     private bool _isLocked;
 
     // FIFO queue for lock requests
     private readonly object _queueLock = new();
-    private readonly Queue<LockRequest> _lockQueue = new();
+    private readonly Queue<ILockRequest> _lockQueue = new();
 
     // Readers tracking and release coordination
     private readonly object _readersLock = new();
@@ -39,25 +41,43 @@ public sealed class UnitOfWorkService : IUnitOfWorkService
     // Batch size for SaveChanges to reduce risk of DB parameter limits
     private const int DefaultBatchSize = 500;
 
+    // Original ctor (keeps existing behavior)
     public UnitOfWorkService(IDbContextFactory<UOWContext> dbContextFactory, ILogger<UnitOfWorkService> logger)
+        : this(dbContextFactory, logger, transactionStarter: null, lockRequestFactory: null)
     {
-        _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
 
-        try
+    // New ctor that accepts optional transaction starter (test seam) and optional lock request factory.
+    public UnitOfWorkService(IDbContextFactory<UOWContext>? dbContextFactory, ILogger<UnitOfWorkService> logger, Func<CancellationToken, Task<IDbContextTransaction>>? transactionStarter, ILockRequestFactory? lockRequestFactory = null)
+    {
+        _dbContextFactory = dbContextFactory;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _transactionStarter = transactionStarter;
+        _lockRequestFactory = lockRequestFactory ?? new DefaultLockRequestFactory();
+
+        if (_dbContextFactory != null)
         {
-            _sharedContext = _dbContextFactory.CreateDbContext();
+            try
+            {
+                _sharedContext = _dbContextFactory.CreateDbContext();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create shared UOWContext in UnitOfWorkService constructor.");
+                throw;
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create shared UOWContext in UnitOfWorkService constructor.");
-            throw;
-        }
+    }
+
+    // Test-only ctor convenience: create service without a DbContextFactory and only a transaction starter.
+    public UnitOfWorkService(ILogger<UnitOfWorkService> logger, Func<CancellationToken, Task<IDbContextTransaction>> transactionStarter)
+        : this(dbContextFactory: null, logger: logger, transactionStarter: transactionStarter, lockRequestFactory: null)
+    {
     }
 
     public Task<Guid> GetDatabaseLockAsync(CancellationToken cancellationToken = default)
     {
-        var request = new LockRequest(cancellationToken);
+        var request = _lockRequestFactory.Create(cancellationToken);
 
         lock (_queueLock)
         {
@@ -72,23 +92,289 @@ public sealed class UnitOfWorkService : IUnitOfWorkService
             }
         }
 
+        // Register a cancellation callback that attempts to remove while queued.
         if (cancellationToken.CanBeCanceled)
         {
             request.CancellationRegistration = cancellationToken.Register(() =>
             {
                 lock (_queueLock)
                 {
+                    // If still queued, remove and mark canceled.
                     if (TryRemoveRequest(request))
                     {
                         request.SetCanceled();
+                        return;
                     }
+
+                    // If removal failed and the request is being granted or already granted, do nothing here.
+                    // Grant path and held-lock registration handle cancellation.
                 }
-            });
+            }, useSynchronizationContext: false);
         }
 
         TryGrantNext();
 
         return request.Task;
+    }
+
+    private bool TryRemoveRequest(ILockRequest request)
+    {
+        if (request == null) return false;
+        if (_lockQueue.Count == 0) return false;
+
+        var found = false;
+        var buffer = new List<ILockRequest>(_lockQueue.Count);
+        while (_lockQueue.Count > 0)
+        {
+            var item = _lockQueue.Dequeue();
+            if (!found && ReferenceEquals(item, request))
+            {
+                found = true;
+                continue;
+            }
+            buffer.Add(item);
+        }
+
+        for (int i = 0; i < buffer.Count; i++)
+        {
+            _lockQueue.Enqueue(buffer[i]);
+        }
+
+        return found;
+    }
+
+    private void TryGrantNext()
+    {
+        ILockRequest? next = null;
+
+        lock (_queueLock)
+        {
+            if (_isLocked) return;
+            while (_lockQueue.Count > 0)
+            {
+                var peek = _lockQueue.Peek();
+                if (peek.IsCanceled)
+                {
+                    _lockQueue.Dequeue();
+                    continue;
+                }
+                next = _lockQueue.Dequeue();
+                // Mark as being granted so cancellation callback knows it's no longer queued.
+                next.IsGranting = true;
+                break;
+            }
+
+            if (next == null) return;
+            _isLocked = true;
+        }
+
+        _ = GrantRequestAsync(next);
+    }
+
+    private async Task GrantRequestAsync(ILockRequest request)
+    {
+        try
+        {
+            // If token already cancelled after dequeuing — honor cancellation immediately.
+            if (request.Token.CanBeCanceled && request.Token.IsCancellationRequested)
+            {
+                try
+                {
+                    request.SetCanceled();
+                }
+                catch { /* best-effort */ }
+
+                lock (_queueLock)
+                {
+                    _isLocked = false;
+                }
+
+                try
+                {
+                    request.CancellationRegistration?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Disposing cancellation registration after cancellation threw.");
+                }
+
+                TryGrantNext();
+                return;
+            }
+
+            // Use configured transaction starter when provided (test seam), otherwise use EF Core BeginTransactionAsync on shared context.
+            _currentTransaction = _transactionStarter != null
+                ? await _transactionStarter(request.Token).ConfigureAwait(false)
+                : await _sharedContext!.Database.BeginTransactionAsync(request.Token).ConfigureAwait(false);
+
+            var lockId = Guid.NewGuid();
+
+            lock (_queueLock)
+            {
+                _currentLockId = lockId;
+                _currentRequest = request;
+            }
+
+            // Switch cancellation registration: queued removal reg is disposed; replace with lock-holder reg that will rollback on cancel.
+            try
+            {
+                request.CancellationRegistration?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Disposing previous cancellation registration threw.");
+            }
+
+            if (request.Token.CanBeCanceled)
+            {
+                // Register a callback that triggers rollback/release for this lock if canceled by the holder.
+                request.CancellationRegistration = request.Token.Register(() =>
+                {
+                    lock (_queueLock)
+                    {
+                        if (_currentLockId != lockId) return;
+                        // Fire-and-forget rollback to avoid blocking the cancellation thread.
+                        _ = HandleLockHolderCancellationAsync(lockId);
+                    }
+                }, useSynchronizationContext: false);
+            }
+
+            request.SetResult(lockId);
+            _logger.LogInformation("Granted database lock {LockId}.", lockId);
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation occurred while starting the transaction (or token already canceled).
+            try
+            {
+                request.SetCanceled();
+            }
+            catch { /* best-effort */ }
+
+            lock (_queueLock)
+            {
+                _isLocked = false;
+            }
+
+            try
+            {
+                request.CancellationRegistration?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Disposing cancellation registration after cancellation threw.");
+            }
+
+            TryGrantNext();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to begin transaction for queued lock request.");
+            request.SetException(ex);
+
+            lock (_queueLock)
+            {
+                _isLocked = false;
+            }
+            TryGrantNext();
+        }
+        finally
+        {
+            // Do not dispose the lock-holder registration here; it must remain while lock is held.
+            // The queued removal registration was disposed above.
+            request.IsGranting = false;
+        }
+    }
+
+    private async Task HandleLockHolderCancellationAsync(Guid lockId)
+    {
+        // Called when the lock-holding request's token is canceled.
+        // Attempt to rollback and release the lock, then continue granting next.
+        try
+        {
+            IDbContextTransaction? tx = null;
+            lock (_queueLock)
+            {
+                if (_currentLockId != lockId) return;
+                tx = _currentTransaction;
+            }
+
+            if (tx != null)
+            {
+                try
+                {
+                    await tx.RollbackAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Rollback during holder cancellation threw.");
+                }
+            }
+        }
+        finally
+        {
+            lock (_queueLock)
+            {
+                try
+                {
+                    _currentTransaction?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Disposing transaction after holder cancellation threw.");
+                }
+
+                _currentTransaction = null;
+                _currentLockId = null;
+
+                try
+                {
+                    _currentRequest?.CancellationRegistration?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Disposing cancellation registration after holder cancellation threw.");
+                }
+
+                _currentRequest = null;
+                _isLocked = false;
+            }
+
+            TryGrantNext();
+        }
+    }
+
+    private async Task WaitIfReleasingAsync(CancellationToken cancellationToken)
+    {
+        TaskCompletionSource<bool>? tcs = null;
+        lock (_readersLock)
+        {
+            if (_isReleasing)
+            {
+                tcs = _noActiveReadersTcs;
+            }
+        }
+
+        if (tcs != null)
+        {
+            try
+            {
+                await tcs.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Select was cancelled while waiting for ongoing release to complete.");
+                throw;
+            }
+        }
+    }
+
+    private static IEnumerable<IList<T>> Batch<T>(IList<T> source, int batchSize)
+    {
+        for (var i = 0; i < source.Count; i += batchSize)
+        {
+            yield return source.Skip(i).Take(Math.Min(batchSize, source.Count - i)).ToList();
+        }
     }
 
     public async Task<IEnumerable<T>> SelectAsync<T>(Func<UOWContext, IQueryable<T>> queryFactory, CancellationToken cancellationToken = default)
@@ -102,6 +388,8 @@ public sealed class UnitOfWorkService : IUnitOfWorkService
 
         try
         {
+            if (_dbContextFactory == null) throw new InvalidOperationException("DbContextFactory is not configured for SelectAsync in this instance.");
+
             using var ctx = _dbContextFactory.CreateDbContext();
             IQueryable<T> query;
             try
@@ -153,9 +441,9 @@ public sealed class UnitOfWorkService : IUnitOfWorkService
             foreach (var batch in Batch(list, DefaultBatchSize))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                _sharedContext.Set<T>().AddRange(batch);
+                _sharedContext!.Set<T>().AddRange(batch);
                 total += batch.Count;
-                await _sharedContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                await _sharedContext!.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
 
             return total;
@@ -184,11 +472,11 @@ public sealed class UnitOfWorkService : IUnitOfWorkService
                 cancellationToken.ThrowIfCancellationRequested();
                 foreach (var item in batch)
                 {
-                    _sharedContext.Set<T>().Update(item);
+                    _sharedContext!.Set<T>().Update(item);
                 }
 
                 total += batch.Count;
-                await _sharedContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                await _sharedContext!.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
 
             return total;
@@ -215,9 +503,9 @@ public sealed class UnitOfWorkService : IUnitOfWorkService
             foreach (var batch in Batch(list, DefaultBatchSize))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                _sharedContext.Set<T>().RemoveRange(batch);
+                _sharedContext!.Set<T>().RemoveRange(batch);
                 total += batch.Count;
-                await _sharedContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                await _sharedContext!.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
 
             return total;
@@ -295,10 +583,21 @@ public sealed class UnitOfWorkService : IUnitOfWorkService
                 _logger.LogWarning(ex, "Disposing transaction threw an exception.");
             }
 
+            // Clear lock state and dispose lock-holder registration if present
             lock (_queueLock)
             {
                 _currentLockId = null;
                 _isLocked = false;
+
+                try
+                {
+                    _currentRequest?.CancellationRegistration?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Disposing cancellation registration threw.");
+                }
+                _currentRequest = null;
             }
 
             lock (_readersLock)
@@ -321,123 +620,6 @@ public sealed class UnitOfWorkService : IUnitOfWorkService
         }
     }
 
-    private void TryGrantNext()
-    {
-        LockRequest? next = null;
-
-        lock (_queueLock)
-        {
-            if (_isLocked) return;
-            while (_lockQueue.Count > 0)
-            {
-                var peek = _lockQueue.Peek();
-                if (peek.IsCanceled)
-                {
-                    _lockQueue.Dequeue();
-                    continue;
-                }
-                next = _lockQueue.Dequeue();
-                break;
-            }
-
-            if (next == null) return;
-            _isLocked = true;
-        }
-
-        _ = GrantRequestAsync(next);
-    }
-
-    private async Task GrantRequestAsync(LockRequest request)
-    {
-        try
-        {
-            _currentTransaction = await _sharedContext.Database.BeginTransactionAsync().ConfigureAwait(false);
-            var lockId = Guid.NewGuid();
-
-            lock (_queueLock)
-            {
-                _currentLockId = lockId;
-            }
-
-            request.SetResult(lockId);
-            _logger.LogInformation("Granted database lock {LockId}.", lockId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to begin transaction for queued lock request.");
-            request.SetException(ex);
-
-            lock (_queueLock)
-            {
-                _isLocked = false;
-            }
-            TryGrantNext();
-        }
-        finally
-        {
-            request.CancellationRegistration?.Dispose();
-        }
-    }
-
-    private async Task WaitIfReleasingAsync(CancellationToken cancellationToken)
-    {
-        TaskCompletionSource<bool>? tcs = null;
-        lock (_readersLock)
-        {
-            if (_isReleasing)
-            {
-                tcs = _noActiveReadersTcs;
-            }
-        }
-
-        if (tcs != null)
-        {
-            try
-            {
-                await tcs.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogInformation("Select was cancelled while waiting for ongoing release to complete.");
-                throw;
-            }
-        }
-    }
-
-    private static IEnumerable<IList<T>> Batch<T>(IList<T> source, int batchSize)
-    {
-        for (var i = 0; i < source.Count; i += batchSize)
-        {
-            yield return source.Skip(i).Take(Math.Min(batchSize, source.Count - i)).ToList();
-        }
-    }
-
-    private bool TryRemoveRequest(LockRequest request)
-    {
-        if (request == null) return false;
-        if (_lockQueue.Count == 0) return false;
-
-        var found = false;
-        var buffer = new List<LockRequest>(_lockQueue.Count);
-        while (_lockQueue.Count > 0)
-        {
-            var item = _lockQueue.Dequeue();
-            if (!found && ReferenceEquals(item, request))
-            {
-                found = true;
-                continue;
-            }
-            buffer.Add(item);
-        }
-
-        for (int i = 0; i < buffer.Count; i++)
-        {
-            _lockQueue.Enqueue(buffer[i]);
-        }
-
-        return found;
-    }
-
     public void Dispose()
     {
         try
@@ -457,30 +639,22 @@ public sealed class UnitOfWorkService : IUnitOfWorkService
         {
             _logger.LogWarning(ex, "Error disposing shared context in Dispose.");
         }
-    }
 
-    private sealed class LockRequest
-    {
-        private readonly TaskCompletionSource<Guid> _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public Task<Guid> Task => _tcs.Task;
-        public CancellationTokenRegistration? CancellationRegistration;
-        public bool IsCanceled { get; private set; }
-
-        public LockRequest(CancellationToken cancellationToken)
+        try
         {
-            if (cancellationToken.CanBeCanceled && cancellationToken.IsCancellationRequested)
+            lock (_queueLock)
             {
-                IsCanceled = true;
-                _tcs.TrySetCanceled(cancellationToken);
+                _currentRequest?.CancellationRegistration?.Dispose();
+                while (_lockQueue.Count > 0)
+                {
+                    var r = _lockQueue.Dequeue();
+                    try { r.CancellationRegistration?.Dispose(); } catch { }
+                }
             }
         }
-
-        public void SetResult(Guid id) => _tcs.TrySetResult(id);
-        public void SetCanceled()
+        catch (Exception ex)
         {
-            IsCanceled = true;
-            _tcs.TrySetCanceled();
+            _logger.LogWarning(ex, "Error disposing cancellation registrations in Dispose.");
         }
-        public void SetException(Exception ex) => _tcs.TrySetException(ex);
     }
 }
