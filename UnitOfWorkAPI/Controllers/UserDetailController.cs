@@ -62,4 +62,25 @@ public class UserDetailController : ControllerBase
             return BadRequest(ex.Message);
         }
     }
+
+    /// <summary>
+    /// Creates a new user details record 
+    /// </summary>
+    /// <param name="userDetail"></param>
+    /// <returns>The new user detail record</returns>
+    [HttpPost()]
+    [ProducesResponseType(StatusCodes.Status201Created, Type = typeof(ActionResult))]
+    [ProducesResponseType(StatusCodes.Status400BadRequest, Type = typeof(BadRequestObjectResult))]
+    public async Task<IActionResult> Create([FromBody] UserDetailDTO userDetail, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return CreatedAtAction("Create", await userDetailService.Create(userDetail, cancellationToken));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ex.Message);
+        }
+
+    }
 }

@@ -9,4 +9,6 @@ public interface IUserDetailService
     Task<UserDetailPagedQueryResult> GetPagedQuery(UserDetailPagedQuery userDetailPagedQuery, CancellationToken cancellationToken);
 
     Task<UserDetailDTO> GetUser(int  id, CancellationToken cancellationToken);
+
+    Task<UserDetailDTO> Create(UserDetailDTO entity, CancellationToken cancellationToken);
 }

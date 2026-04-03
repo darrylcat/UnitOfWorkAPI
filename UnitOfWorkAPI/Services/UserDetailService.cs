@@ -64,4 +64,45 @@ public class UserDetailService : IUserDetailService
             throw;
         }
     }
+
+    public async Task<UserDetailDTO> Create(UserDetailDTO entity, CancellationToken cancellationToken)
+    {
+        bool released = false;
+        var lockId = await unitOfWorkService.GetDatabaseLockAsync();
+        try
+        {
+            var entities = new List<UserDetail>();
+            entities.Add(new UserDetail()
+            {
+                Active = entity.Active,
+                Email = entity.Email,
+                FirstName = entity.FirstName,
+                LastName = entity.LastName,
+                UpdatedById = entity.UpdatedById,
+                UpdatedTime = DateTime.UtcNow
+            });
+            var changesMade = await unitOfWorkService.InsertAsync(entities, lockId, cancellationToken);
+
+            if(changesMade != 1)
+            {
+                throw new Exception("Unable to create new User Detail record");
+            }
+
+            await unitOfWorkService.ReleaseDataLockAsync(lockId, DbTransactionOption.Commit, cancellationToken);
+            released = true;
+            return entities.First().ToDTO();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex.Message);
+            throw;
+        }
+        finally
+        {
+            if (!released)
+            {
+                await unitOfWorkService.ReleaseDataLockAsync(lockId, DbTransactionOption.Rollback, cancellationToken);
+            }
+        }
+    }
 }
