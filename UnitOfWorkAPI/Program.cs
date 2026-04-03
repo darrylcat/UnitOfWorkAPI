@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using UnitOfWorkAPI.Models.Database;
 using UnitOfWorkAPI.Services;
+using UnitOfWorkAPI.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,16 +15,13 @@ builder.Services.AddSingleton<IUnitOfWorkService, UnitOfWorkService>();
 builder.Services.AddScoped<IUserDetailService, UserDetailService>();
 
 builder.Services.AddControllers();
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+// Configure OpenAPI/Swagger (project-specific extension)
+builder.Services.AddProjectOpenApi();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
+// Map Swagger UI unconditionally (available in all environments) at /swagger
+app.MapProjectOpenApi();
 
 app.UseHttpsRedirection();
 

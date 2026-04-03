@@ -16,7 +16,7 @@ public class BasePagedQueryResult<Q,DTO>
     public IEnumerable<DTO> Data { get; set; }
 
     [JsonPropertyName("errorMessages")]
-    public IEnumerable<string> ErrorMessages { get; set; }
+    public IList<string> ErrorMessages { get; set; }
 
     public BasePagedQueryResult()
     {

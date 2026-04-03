@@ -9,7 +9,7 @@ namespace UnitOfWorkAPI.Extensions;
 
 public static class OpenApiExtensions
 {
-    public static IServiceCollection AddOpenApi(this IServiceCollection services)
+    public static IServiceCollection AddProjectOpenApi(this IServiceCollection services)
     {
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen(c =>
@@ -27,13 +27,14 @@ public static class OpenApiExtensions
         return services;
     }
 
-    public static WebApplication MapOpenApi(this WebApplication app)
+    public static WebApplication MapProjectOpenApi(this WebApplication app)
     {
+        // Serve swagger JSON and UI at /swagger
         app.UseSwagger();
         app.UseSwaggerUI(c =>
         {
             c.SwaggerEndpoint("/swagger/v1/swagger.json", "UnitOfWorkAPI v1");
-            c.RoutePrefix = string.Empty; // serve the UI at application root
+            c.RoutePrefix = "swagger"; // conventional path: /swagger
         });
 
         return app;

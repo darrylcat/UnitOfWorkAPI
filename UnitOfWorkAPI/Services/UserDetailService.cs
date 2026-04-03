@@ -33,7 +33,7 @@ public class UserDetailService : IUserDetailService
             result.Data = results.Select(s => s.ToDTO()).AsEnumerable();
         }
         catch (Exception ex) {
-            result.ErrorMessages.Append(ex.Message);
+            result.ErrorMessages.Add(ex.Message);
             logger.LogError(ex.Message);
         }
         finally

@@ -1,6 +1,8 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using UnitOfWorkAPI.Models.DTOs.Data;
 using UnitOfWorkAPI.Models.DTOs.Requests;
+using UnitOfWorkAPI.Models.DTOs.Responses;
 using UnitOfWorkAPI.Services;
 
 namespace UnitOfWorkAPI.Controllers;
@@ -18,17 +20,38 @@ public class UserDetailController : ControllerBase
         this.userDetailService = userDetailService;
     }
 
+    /// <summary>
+    /// Allows client to search the user details table, and return paginated results
+    /// </summary>
+    /// <param name="userDetailPagedQuery">Contains the parameters required for searching the entities</param>
     [HttpGet()]
+    [ProducesResponseType<UserDetailPagedQueryResult>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Get([FromQuery] UserDetailPagedQuery userDetailPagedQuery, CancellationToken cancellationToken)
     {
-        var result = await userDetailService.GetPagedQuery(userDetailPagedQuery, cancellationToken);
-        if (result == null || result.ErrorMessages.Any()) {
-            return BadRequest(result == null ? "Unable to retrieve User Details" : String.Join("" , result.ErrorMessages));
-        } 
-        return Ok(result);
+        try
+        {
+            var result = await userDetailService.GetPagedQuery(userDetailPagedQuery, cancellationToken);
+            if (result == null || result.ErrorMessages.Any())
+            {
+                return BadRequest(result == null ? "Unable to retrieve User Details" : String.Join("", result.ErrorMessages));
+            }
+            return Ok(result);
+        }
+        catch (TaskCanceledException tce)
+        {
+            logger.LogError(tce.Message);
+            throw;
+        }
     }
 
+    /// <summary>
+    /// Returns a single user details record based on id
+    /// </summary>
+    /// <param name="id"></param>
     [HttpGet("{id}")]
+    [ProducesResponseType<UserDetailDTO>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Get([FromRoute] int id, CancellationToken cancellationToken)
     {
         try
