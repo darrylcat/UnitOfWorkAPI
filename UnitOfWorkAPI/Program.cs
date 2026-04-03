@@ -11,6 +11,7 @@ builder.Services.AddDbContextFactory<UOWContext>(options =>
 
 // Register UnitOfWorkService as a singleton, exposed via IUnitOfWorkService
 builder.Services.AddSingleton<IUnitOfWorkService, UnitOfWorkService>();
+builder.Services.AddScoped<IUserDetailService, UserDetailService>();
 
 builder.Services.AddControllers();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
