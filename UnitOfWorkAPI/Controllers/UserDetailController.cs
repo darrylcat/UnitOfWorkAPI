@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using UnitOfWorkAPI.Models.DTOs.Data;
 using UnitOfWorkAPI.Models.DTOs.Requests;
@@ -82,5 +83,29 @@ public class UserDetailController : ControllerBase
             return BadRequest(ex.Message);
         }
 
+    }
+
+    /// <summary>
+    /// Update an existing record
+    /// </summary>
+    /// <param name="id"></param>
+    /// <param name="dto"></param>
+    /// <returns></returns>
+    [HttpPut("{id}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent, Type = typeof(NoContent))]
+    [ProducesResponseType(StatusCodes.Status404NotFound, Type = typeof(NotFoundResult))]
+    public async Task<IActionResult> Update([FromRoute] int id, [FromBody] UserDetailDTO dto, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if(await userDetailService.Update(id, dto, cancellationToken))
+            {
+                return NoContent();
+            }
+        }
+        catch (Exception ex) {
+            logger.LogError(ex.Message);
+        }
+        return NotFound();
     }
 }

@@ -10,5 +10,7 @@ public interface IUserDetailService
 
     Task<UserDetailDTO> GetUser(int  id, CancellationToken cancellationToken);
 
-    Task<UserDetailDTO> Create(UserDetailDTO entity, CancellationToken cancellationToken);
+    Task<UserDetailDTO> Create(UserDetailDTO dto, CancellationToken cancellationToken);
+
+    Task<Boolean> Update(int id,UserDetailDTO dto, CancellationToken cancellationToken);
 }

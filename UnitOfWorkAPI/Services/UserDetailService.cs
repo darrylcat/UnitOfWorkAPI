@@ -1,4 +1,6 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using UnitOfWorkAPI.Models.Database;
 using UnitOfWorkAPI.Models.DTOs.Data;
 using UnitOfWorkAPI.Models.DTOs.Requests;
@@ -47,11 +49,7 @@ public class UserDetailService : IUserDetailService
     {
         try
         {
-            var entities = await unitOfWorkService.SelectAsync<UserDetail>(c => c.UserDetails
-            .AsQueryable()
-            .Where(x => x.Id == id)
-            .Take(1)
-            , cancellationToken);
+            var entities = await Find(id, cancellationToken);
             if(entities == null || !entities.Any())
             {
                 throw new KeyNotFoundException($"Unable to find user detail with Id of {id}");
@@ -104,5 +102,70 @@ public class UserDetailService : IUserDetailService
                 await unitOfWorkService.ReleaseDataLockAsync(lockId, DbTransactionOption.Rollback, cancellationToken);
             }
         }
+    }
+
+    /// <summary>
+    /// Updates an existing record in the database
+    /// </summary>
+    /// <param name="id">Unique key</param>
+    /// <param name="entity">New details</param>
+    /// <returns>Nothing</returns>
+    /// <exception cref="NotImplementedException"></exception>
+    [HttpPut("{id}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent, Type = typeof(NoContent))]
+    [ProducesResponseType(StatusCodes.Status404NotFound, Type = typeof(NotFoundResult))]
+    public async Task<Boolean> Update(int id, UserDetailDTO dto, CancellationToken cancellationToken)
+    {
+        bool released = false;
+        var lockId = await unitOfWorkService.GetDatabaseLockAsync();
+        try
+        {
+            var entities = await Find(id, cancellationToken);
+
+            if (entities == null || ! entities.Any())
+            {
+                throw new KeyNotFoundException($"Unable to find existing user detail record {id}");
+            }
+
+            var entity = entities.First();
+            entity.UpdatedById = dto.UpdatedById;
+            entity.UpdatedTime = DateTime.UtcNow;
+            entity.UserName = dto.UserName;
+            entity.LastName = dto.LastName;
+            entity.FirstName = dto.FirstName;
+            entity.Active = dto.Active;
+            entity.Email = dto.Email;
+
+
+            var result = await unitOfWorkService.UpdateAsync(entities, lockId, cancellationToken);
+            if(result != 1)
+            {
+                throw new Exception($"Unable to update user detail record {id}");
+            }
+
+            await unitOfWorkService.ReleaseDataLockAsync(lockId, DbTransactionOption.Commit, cancellationToken);
+            released = true;
+            return true;
+        }
+        catch (Exception ex) {
+            logger.LogError(ex.Message);
+            return false;
+        }
+        finally
+        {
+            if (!released)
+            {
+                await unitOfWorkService.ReleaseDataLockAsync(lockId, DbTransactionOption.Rollback, cancellationToken);
+            }
+        }
+    }
+
+    private Task<IEnumerable<UserDetail>> Find(int id, CancellationToken cancellationToken)
+    {
+        return unitOfWorkService.SelectAsync(c => c.UserDetails
+                                                    .AsQueryable()
+                                                    .AsNoTracking()
+                                                    .Where(x => x.Id == id)
+                                                    .Take(1), cancellationToken);
     }
 }
