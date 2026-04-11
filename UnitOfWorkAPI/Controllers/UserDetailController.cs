@@ -91,9 +91,9 @@ public class UserDetailController : ControllerBase
     /// <summary>
     /// Update an existing record
     /// </summary>
-    /// <param name="id"></param>
-    /// <param name="dto"></param>
-    /// <returns></returns>
+    /// <param name="id">Unique identifier of the record to update</param>
+    /// <param name="dto">New details for the record</param>
+    /// <returns>NoContent result</returns>
     [HttpPut("{id}")]
     [ProducesResponseType(StatusCodes.Status204NoContent, Type = typeof(NoContent))]
     [ProducesResponseType(StatusCodes.Status404NotFound, Type = typeof(NotFoundResult))]

@@ -82,6 +82,7 @@ public class UserDetailService : IUserDetailService
                 Email = entity.Email,
                 FirstName = entity.FirstName,
                 LastName = entity.LastName,
+                UserName = entity.UserName,
                 UpdatedById = entity.UpdatedById,
                 UpdatedTime = DateTime.UtcNow
             });
@@ -110,16 +111,7 @@ public class UserDetailService : IUserDetailService
         }
     }
 
-    /// <summary>
-    /// Updates an existing record in the database
-    /// </summary>
-    /// <param name="id">Unique key</param>
-    /// <param name="entity">New details</param>
-    /// <returns>Nothing</returns>
-    /// <exception cref="NotImplementedException"></exception>
-    [HttpPut("{id}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent, Type = typeof(NoContent))]
-    [ProducesResponseType(StatusCodes.Status404NotFound, Type = typeof(NotFoundResult))]
+
     public async Task<Boolean> Update(int id, UserDetailDTO dto, CancellationToken cancellationToken)
     {
         bool released = false;

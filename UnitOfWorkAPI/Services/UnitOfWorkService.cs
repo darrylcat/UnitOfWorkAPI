@@ -73,6 +73,7 @@ public sealed class UnitOfWorkService : IUnitOfWorkService, IDisposable
     public UnitOfWorkService(ILogger<UnitOfWorkService> logger, Func<CancellationToken, Task<IDbContextTransaction>> transactionStarter)
         : this(dbContextFactory: null, logger: logger, transactionStarter: transactionStarter, lockRequestFactory: null)
     {
+        Console.WriteLine("This shouldn't be called by production");
     }
 
     public Task<Guid> GetDatabaseLockAsync(CancellationToken cancellationToken = default)
@@ -202,10 +203,18 @@ public sealed class UnitOfWorkService : IUnitOfWorkService, IDisposable
                 return;
             }
 
-            // Use configured transaction starter when provided (test seam), otherwise use EF Core BeginTransactionAsync on shared context.
+            if(_sharedContext == null)
+            {
+                throw new InvalidOperationException("Shared DbContext is not configured (dbContextFactory was null).");
+            }
+            if(_sharedContext.Database == null)
+            {
+                throw new InvalidOperationException("shared DbContext.Database is not configured (_sharedContext.Database was null).");
+            }
+
             _currentTransaction = _transactionStarter != null
                 ? await _transactionStarter(request.Token).ConfigureAwait(false)
-                : await _sharedContext!.Database.BeginTransactionAsync(request.Token).ConfigureAwait(false);
+                : await _sharedContext.Database.BeginTransactionAsync(request.Token).ConfigureAwait(false);
 
             var lockId = Guid.NewGuid();
 
