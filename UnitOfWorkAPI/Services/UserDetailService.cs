@@ -134,12 +134,13 @@ public class UserDetailService : IUserDetailService
             entity.Active = dto.Active;
             entity.Email = dto.Email;
 
-
             var result = await unitOfWorkService.UpdateAsync(entities, lockId, cancellationToken);
             if(result != 1)
             {
                 throw new Exception($"Unable to update user detail record {id}");
             }
+
+            await Task.Delay(50 * 1000);
 
             await unitOfWorkService.ReleaseDataLockAsync(lockId, DbTransactionOption.Commit, cancellationToken);
             released = true;
