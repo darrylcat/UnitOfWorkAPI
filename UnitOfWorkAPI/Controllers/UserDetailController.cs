@@ -8,6 +8,9 @@ using UnitOfWorkAPI.Services;
 
 namespace UnitOfWorkAPI.Controllers;
 
+/// <summary>
+/// Provides access to the User Detail records
+/// </summary>
 [Route("api/[controller]")]
 [ApiController]
 public class UserDetailController : ControllerBase

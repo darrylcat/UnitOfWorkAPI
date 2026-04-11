@@ -1,4 +1,6 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace UnitOfWorkAPI.Models.Database;
 
@@ -18,6 +20,8 @@ public class Customer : BaseRecord
     [Required]
     [MaxLength(10)]
     public string PostCode { get; set; }
+    [Precision(18,2)]
     public decimal CreditLimit { get; set; }
+    [Precision(18, 2)]
     public decimal Balance { get; set; }
 }

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+﻿using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
 
 namespace UnitOfWorkAPI.Models.Database;
@@ -18,8 +18,10 @@ public class Product : BaseRecord
     [Required]
     public int PackSize { get; set; }
     [Required]
+    [Precision(18, 2)]
     public decimal Cost { get; set; }
     [Required]
+    [Precision(18, 2)]
     public decimal Price { get; set; }
     [Required]
     public int QtyInStock { get; set; }

@@ -361,3 +361,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Local ASP.NET Core secrets / overrides
+/UnitOfWorkAPI/appsettings.Development.json

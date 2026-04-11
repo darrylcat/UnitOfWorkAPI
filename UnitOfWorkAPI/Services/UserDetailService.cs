@@ -23,11 +23,17 @@ public class UserDetailService : IUserDetailService
     public async Task<UserDetailPagedQueryResult> GetPagedQuery(UserDetailPagedQuery userDetailPagedQuery, CancellationToken cancellationToken)
     {
         var result = new UserDetailPagedQueryResult();
+        bool searchForIsNull = string.IsNullOrEmpty(userDetailPagedQuery.SearchFor);
+        string normalisedSearchFor = userDetailPagedQuery.SearchFor?.Trim().ToLower() ?? string.Empty;
         try
         {
             var results = await unitOfWorkService.SelectAsync<UserDetail>(
                 c => c.UserDetails.AsQueryable()
-                .Where(x => x.UserName.Contains(userDetailPagedQuery.SearchFor.Trim()))
+                .Where(x => searchForIsNull ||  
+                    x.UserName.Trim().ToLower().Contains(normalisedSearchFor) || 
+                    x.FirstName.Trim().ToLower().Contains(normalisedSearchFor) ||
+                    x.LastName.Trim().ToLower().Contains(normalisedSearchFor)
+                )
                 .OrderBy(o => o.UserName)
                 .Skip(userDetailPagedQuery.Page * userDetailPagedQuery.Size)
                 .Take(userDetailPagedQuery.Size)

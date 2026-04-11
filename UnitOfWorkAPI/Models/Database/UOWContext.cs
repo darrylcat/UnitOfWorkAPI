@@ -50,6 +50,9 @@ public class UOWContext : DbContext
         modelBuilder.Entity<Invoice>().HasOne(i => i.UpdatedBy).WithMany().HasForeignKey("UpdatedById").OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<InvoiceItem>().HasOne(ii => ii.UpdatedBy).WithMany().HasForeignKey("UpdatedById").OnDelete(DeleteBehavior.Restrict);
 
+        // --- Fix: ensure UserDetail self-reference does NOT cascade delete ---
+        modelBuilder.Entity<UserDetail>().HasOne(ud => ud.UpdatedBy).WithMany().HasForeignKey("UpdatedById").OnDelete(DeleteBehavior.Restrict);
+
         base.OnModelCreating(modelBuilder);
     }
 }
