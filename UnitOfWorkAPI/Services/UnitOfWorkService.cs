@@ -398,12 +398,12 @@ public sealed class UnitOfWorkService : IUnitOfWorkService, IDisposable
         try
         {
             if (_dbContextFactory == null) throw new InvalidOperationException("DbContextFactory is not configured for SelectAsync in this instance.");
-
-            using var ctx = _dbContextFactory.CreateDbContext();
+            if (_sharedContext == null) throw new InvalidOperationException("SharedContext is not configured for SelectAsync in this instance.");
+            // using var ctx = _dbContextFactory.CreateDbContext();
             IQueryable<T> query;
             try
             {
-                query = queryFactory(ctx) ?? Enumerable.Empty<T>().AsQueryable();
+                query = queryFactory(_sharedContext) ?? Enumerable.Empty<T>().AsQueryable();
             }
             catch (Exception ex)
             {

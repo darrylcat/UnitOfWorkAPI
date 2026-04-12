@@ -28,7 +28,9 @@ public class UserDetailService : IUserDetailService
         try
         {
             var results = await unitOfWorkService.SelectAsync<UserDetail>(
-                c => c.UserDetails.AsQueryable()
+                c => c.UserDetails
+                .AsNoTracking()
+                .AsQueryable()
                 .Where(x => searchForIsNull ||  
                     x.UserName.Trim().ToLower().Contains(normalisedSearchFor) || 
                     x.FirstName.Trim().ToLower().Contains(normalisedSearchFor) ||
