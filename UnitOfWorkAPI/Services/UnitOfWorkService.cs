@@ -454,7 +454,7 @@ public sealed class UnitOfWorkService : IUnitOfWorkService, IDisposable
                 total += batch.Count;
                 await _sharedContext!.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
-
+            if (_sharedContext != null) _sharedContext.ChangeTracker.Clear();
             return total;
         }
         catch (Exception ex)
@@ -487,7 +487,7 @@ public sealed class UnitOfWorkService : IUnitOfWorkService, IDisposable
                 total += batch.Count;
                 await _sharedContext!.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
-
+            if(_sharedContext != null) _sharedContext.ChangeTracker.Clear();
             return total;
         }
         catch (Exception ex)
@@ -516,7 +516,7 @@ public sealed class UnitOfWorkService : IUnitOfWorkService, IDisposable
                 total += batch.Count;
                 await _sharedContext!.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
-
+            if (_sharedContext != null) _sharedContext.ChangeTracker.Clear();
             return total;
         }
         catch (Exception ex)
