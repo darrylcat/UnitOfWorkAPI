@@ -198,8 +198,8 @@ public class UserDetailService : IUserDetailService
     private Task<IEnumerable<UserDetail>> Find(int id, CancellationToken cancellationToken)
     {
         return unitOfWorkService.SelectAsync(c => c.UserDetails
-                                                    .AsQueryable()
                                                     .AsNoTracking()
+                                                    .AsQueryable()
                                                     .Where(x => x.Id == id)
                                                     .Take(1), cancellationToken);
     }
