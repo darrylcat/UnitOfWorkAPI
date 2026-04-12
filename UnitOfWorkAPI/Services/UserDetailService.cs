@@ -9,6 +9,10 @@ using UnitOfWorkAPI.Services.Transformations;
 
 namespace UnitOfWorkAPI.Services;
 
+/// <summary>
+/// Provides operations for querying, creating, and updating user detail records with support for database locking and
+/// paging.
+/// </summary>
 public class UserDetailService : IUserDetailService
 {
     private readonly ILogger<UserDetailService> logger;
@@ -20,6 +24,14 @@ public class UserDetailService : IUserDetailService
         this.unitOfWorkService = unitOfWorkService;
     }
 
+    /// <summary>
+    /// Searches the UserDetail table for records matching search criteria.
+    /// Doesn't use a database lock, so records returned may not match any changed
+    /// since the current transaction completes/fails
+    /// </summary>
+    /// <param name="userDetailPagedQuery">parameters used to search the UserDetail table</param>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
     public async Task<UserDetailPagedQueryResult> GetPagedQuery(UserDetailPagedQuery userDetailPagedQuery, CancellationToken cancellationToken)
     {
         var result = new UserDetailPagedQueryResult();
@@ -53,8 +65,19 @@ public class UserDetailService : IUserDetailService
         return result;
     }
 
+    /// <summary>
+    /// Fetches a single UserDetail record. 
+    /// Uses a Database lock to ensure it gets a record from the DB without
+    /// changes being in progress
+    /// </summary>
+    /// <param name="id">UserDetail.Id of record to retrieve</param>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
+    /// <exception cref="KeyNotFoundException"></exception>
     public async Task<UserDetailDTO> GetUser(int id, CancellationToken cancellationToken)
     {
+        bool released = false;
+        var lockId = await unitOfWorkService.GetDatabaseLockAsync();
         try
         {
             var entities = await Find(id, cancellationToken);
@@ -69,8 +92,19 @@ public class UserDetailService : IUserDetailService
             logger.LogError(ex.Message);
             throw;
         }
+        finally
+        {
+            await unitOfWorkService.ReleaseDataLockAsync(lockId, DbTransactionOption.Rollback, cancellationToken);
+            released = true;
+        }
     }
 
+    /// <summary>
+    /// Creates a new user detail record asynchronously.
+    /// </summary>
+    /// <param name="entity">The user detail data to create.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>A task that represents the asynchronous operation. The task result contains the created user detail.</returns>
     public async Task<UserDetailDTO> Create(UserDetailDTO entity, CancellationToken cancellationToken)
     {
         bool released = false;
